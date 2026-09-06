@@ -2,7 +2,7 @@
 // @name         Claude Bulk Deleter (with Claude Code support)
 // @namespace    http://tampermonkey.net/
 // @version      2.3
-// @description  Bulk delete Claude.ai chats and artifacts. Auto detects org id, paginates, keeps log visible on error, skips starred legacy chats, auto-queues web chats (cowork-remote sessions), confirms real Claude Code sessions and artifacts one by one. Collapsible bottom-right pull tab with progress-bar fill.
+// @description  Bulk delete Claude.ai chats and artifacts. Auto detects org id, paginates, keeps log visible on error, skips starred legacy chats, auto-queues web chats (cowork-remote sessions), confirms inactive/archived Claude Code sessions and artifacts one by one, skips live ones. Collapsible bottom-right pull tab with progress-bar fill.
 // @author       akeslo
 // @match        https://claude.ai/*
 // @grant        GM_addStyle
@@ -261,6 +261,20 @@
   function isProtectedFromBulkDelete(item) {
     if (!item || typeof item !== 'object') return false;
     return Boolean(item.is_starred || item.is_pinned || item.starred || item.pinned);
+  }
+
+  // Live agent runs must never be offered for deletion at all. Verified against the live
+  // endpoint 2026-09-06: `status` is 'active' or 'archived', and `status_bucket` is
+  // working / review_ready / blocked / completed. The two are independent - a live session
+  // sitting idle reports status 'active' with bucket 'completed', so bucket alone would
+  // offer a running session for deletion. `status` is the field that means archived, so
+  // that is the only thing tested, positively: an unknown future value reads as live.
+  const INACTIVE_STATUSES = ['archived', 'inactive', 'deleted'];
+
+  function isInactiveCodeSession(s) {
+    if (!s || typeof s !== 'object') return false;
+    if (s.is_archived || s.archived) return true;
+    return INACTIVE_STATUSES.includes(String(s.status || '').toLowerCase());
   }
 
   async function fetchAllSessions() {
@@ -610,17 +624,25 @@
         if (isProtectedFromBulkDelete(s)) { starredCount++; return false; }
         return true;
       });
-      const codeSessions = allSessions.filter(s => !s._webChat);
+      // Only inactive/archived Claude Code sessions are offered for confirmation; live runs
+      // (working / review_ready / blocked) are skipped entirely, never prompted for.
+      const allCodeSessions = allSessions.filter(s => !s._webChat);
+      const codeSessions = allCodeSessions.filter(isInactiveCodeSession);
+      const liveCodeSessions = allCodeSessions.length - codeSessions.length;
 
       S.chats = normalChats.concat(webChats);
 
       log(`Found ${normalChats.length} legacy chats and ${webChats.length} web chats (auto-queued).`);
 
+      if (liveCodeSessions > 0) {
+        log(`Skipped ${liveCodeSessions} live Claude Code sessions (not archived).`);
+      }
+
       if (codeSessions.length > 0) {
-        log(`Found ${codeSessions.length} Claude Code sessions.`);
+        log(`Found ${codeSessions.length} inactive/archived Claude Code sessions.`);
         let added = 0;
         for (const s of codeSessions) {
-          if (confirm(`Delete Claude Code session:\n"${s._title}"\nstatus: ${s.status_bucket || s.status}?`)) {
+          if (confirm(`Delete inactive Claude Code session:\n"${s._title}"\nstatus: ${s.status_bucket || s.status}?`)) {
             S.chats.push(s);
             added++;
           }
