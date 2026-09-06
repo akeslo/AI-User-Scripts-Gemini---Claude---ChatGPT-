@@ -31,6 +31,7 @@ const BODY = `
     fetchAllSessions,
     isWebChatSession,
     isProtectedFromBulkDelete,
+    isInactiveCodeSession,
     fetchFrames,
     fetchPublishedArtifacts,
     deleteChat,

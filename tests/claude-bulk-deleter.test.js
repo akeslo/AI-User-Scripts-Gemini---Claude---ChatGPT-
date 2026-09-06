@@ -123,3 +123,35 @@ describe('Claude Bulk Deleter — star/pin guard on the bulk queue', () => {
     expect(api().isProtectedFromBulkDelete(undefined)).toBe(false);
   });
 });
+
+describe('Claude Bulk Deleter — live-session guard on Claude Code sessions', () => {
+  // A live agent run must never be offered for deletion. `status` is the only field
+  // tested, and only positively against a known-inactive set — an unknown future
+  // status value must read as live, never as safe-to-offer.
+  const api = () => loadClaudeApi({ fetch: vi.fn() });
+
+  it('treats an archived session as inactive', () => {
+    expect(api().isInactiveCodeSession({ status: 'archived' })).toBe(true);
+    expect(api().isInactiveCodeSession({ status: 'ARCHIVED' })).toBe(true);
+  });
+
+  it('treats a live-status session as active (not inactive), even with a completed bucket', () => {
+    expect(api().isInactiveCodeSession({ status: 'active', status_bucket: 'completed' })).toBe(false);
+    expect(api().isInactiveCodeSession({ status: 'active', status_bucket: 'working' })).toBe(false);
+  });
+
+  it('treats an explicit archived flag as inactive regardless of status', () => {
+    expect(api().isInactiveCodeSession({ is_archived: true, status: 'active' })).toBe(true);
+    expect(api().isInactiveCodeSession({ archived: true, status: 'active' })).toBe(true);
+  });
+
+  it('treats an unknown/future status value as live, not inactive', () => {
+    expect(api().isInactiveCodeSession({ status: 'some_future_status' })).toBe(false);
+  });
+
+  it('treats a missing or malformed session as not inactive rather than throwing', () => {
+    expect(api().isInactiveCodeSession({})).toBe(false);
+    expect(api().isInactiveCodeSession(null)).toBe(false);
+    expect(api().isInactiveCodeSession(undefined)).toBe(false);
+  });
+});
